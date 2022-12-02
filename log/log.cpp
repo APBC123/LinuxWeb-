@@ -1,6 +1,6 @@
 #include "log.h"
 
-void Log::init(int level = 1, const char *path const char *suffix, int maxqueuecapacity)
+void Log::init(int level = 1, const char *path, const char *suffix, int maxqueuecapacity)
 {
     m_isopen = true;
     m_level = level;
@@ -47,13 +47,13 @@ void Log::init(int level = 1, const char *path const char *suffix, int maxqueuec
     }
 }
 
-static Log *Log::instance()
+Log *Log::instance()
 {
     static Log inst;
     return &inst;
 }
 
-static void Log::flushlogthread()
+void Log::flushlogthread()
 {
     Log::instance()->asyncwrite();
 }
@@ -75,13 +75,13 @@ void Log::write(int level, const char *format, ...)
         snprintf(tail, 36, "%04d_%02d_%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
         if (m_today != t.tm_mday)
         {
-            snprintf(newFile, LOG_NAME_LEN - 72, "%s/%s%s", m_path, tail, m_suffix);
+            snprintf(newfile, LOG_NAME_LEN - 72, "%s/%s%s", m_path, tail, m_suffix);
             m_today = t.tm_mday;
             m_linecount = 0;
         }
         else
         {
-            snprintf(newfile, LOG_NAME_LEN - 72, "%s/%s-%d%s", m_path, tai;, (m_linecount / MAX_LINES), m_suffix);
+            snprintf(newfile, LOG_NAME_LEN - 72, "%s/%s-%d%s", m_path, tail, (m_linecount / MAX_LINES), m_suffix);
         }
         locker.lock();
         flush();
@@ -92,7 +92,7 @@ void Log::write(int level, const char *format, ...)
     {
         std::unique_lock<std::mutex> locker(m_mtx);
         m_linecount++;
-        int n = snprintf(m_buff.beginwrite(), 128, "%d-%02d-%02d %02d:%02d:%02d.%06ld", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, now.tv_usec);
+        int n = snprintf(m_buff.beginwrite(), 128, "%d-%02d-%02d %02d:%02d:%02d.%06ld ", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, now.tv_usec);
         m_buffer.hashwritten(n);
         AppendLogLevelTitle(level);
         va_start(valist, format);
@@ -167,7 +167,7 @@ Log::~Log()
     }
 }
 
-void Log::AppendLogLevelTitle_(int level)
+void Log::AppendLogLevelTitle(int level)
 {
     switch (level)
     {
