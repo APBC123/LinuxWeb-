@@ -1,9 +1,3 @@
-/*
- * @Author       : mark
- * @Date         : 2020-06-26
- * @copyleft Apache 2.0
- */ 
-
 #ifndef BUFFER_H
 #define BUFFER_H
 #include <cstring>   //perror
@@ -53,4 +47,4 @@ private:
     std::atomic<std::size_t> writePos_;
 };
 
-#endif //BUFFER_H
+#endif 
