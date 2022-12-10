@@ -1,9 +1,3 @@
-/*
- * @Author       : mark
- * @Date         : 2020-06-17
- * @copyleft Apache 2.0
- */
-
 #include "webserver.h"
 
 using namespace std;
@@ -277,5 +271,3 @@ int WebServer::SetFdNonblock(int fd) {
     assert(fd > 0);
     return fcntl(fd, F_SETFL, fcntl(fd, F_GETFD, 0) | O_NONBLOCK);
 }
-
-
