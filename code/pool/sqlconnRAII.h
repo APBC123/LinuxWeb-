@@ -1,9 +1,3 @@
-/*
- * @Author       : mark
- * @Date         : 2020-06-19
- * @copyleft Apache 2.0
- */ 
-
 #ifndef SQLCONNRAII_H
 #define SQLCONNRAII_H
 #include "sqlconnpool.h"
@@ -27,4 +21,4 @@ private:
     SqlConnPool* connpool_;
 };
 
-#endif //SQLCONNRAII_H
+#endif
