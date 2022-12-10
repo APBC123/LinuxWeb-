@@ -1,8 +1,3 @@
-/*
- * @Author       : mark
- * @Date         : 2020-06-15
- * @copyleft Apache 2.0
- */ 
 #ifndef EPOLLER_H
 #define EPOLLER_H
 
@@ -37,4 +32,4 @@ private:
     std::vector<struct epoll_event> events_;    
 };
 
-#endif //EPOLLER_H
+#endif
