@@ -1,43 +1,51 @@
 #include "buffer.h"
 
-Buffer::Buffer(int initBuffSize) : buffer_(initBuffSize), readPos_(0), writePos_(0) {}
-
-size_t Buffer::ReadableBytes() const
+Buffer::Buffer(int InitBufferSize = 1024) : m_buffer(InitBufferSize)
 {
-    return writePos_ - readPos_;
+    m_ReadPos = 0;
+    m_WritePos = 0;
 }
+
 size_t Buffer::WritableBytes() const
 {
-    return buffer_.size() - writePos_;
+    return m_buffer.size() - m_WritePos;
 }
-
-size_t Buffer::PrependableBytes() const
+size_t Buffer::ReadableBytes() const
 {
-    return readPos_;
+    return m_buffer.size() - m_ReadPos;
 }
 
 const char *Buffer::Peek() const
 {
-    return BeginPtr_() + readPos_;
+    return &*m_buffer.begin() + m_ReadPos;
+}
+
+const char *Buffer::BeginWriteConst() const
+{
+    return &*m_buffer.begin() + m_WritePos;
+}
+
+char *Buffer::BeginWrite()
+{
+    return &*m_buffer.begin() + m_WritePos;
+}
+
+void Buffer::HasWritten(size_t len)
+{
+    m_WritePos += len;
 }
 
 void Buffer::Retrieve(size_t len)
 {
     assert(len <= ReadableBytes());
-    readPos_ += len;
-}
-
-void Buffer::RetrieveUntil(const char *end)
-{
-    assert(Peek() <= end);
-    Retrieve(end - Peek());
+    m_ReadPos += len;
 }
 
 void Buffer::RetrieveAll()
 {
-    bzero(&buffer_[0], buffer_.size());
-    readPos_ = 0;
-    writePos_ = 0;
+    bzero(&m_buffer[0], m_buffer.size());
+    m_ReadPos = 0;
+    m_WritePos = 0;
 }
 
 std::string Buffer::RetrieveAllToStr()
@@ -47,19 +55,16 @@ std::string Buffer::RetrieveAllToStr()
     return str;
 }
 
-const char *Buffer::BeginWriteConst() const
+void Buffer::Append(const char *str, size_t len)
 {
-    return BeginPtr_() + writePos_;
-}
-
-char *Buffer::BeginWrite()
-{
-    return BeginPtr_() + writePos_;
-}
-
-void Buffer::HasWritten(size_t len)
-{
-    writePos_ += len;
+    assert(str);
+    if (WritableBytes() < len)
+    {
+        m_MakeSpace(len);
+    }
+    assert(WritableBytes() >= len);
+    std::copy(str, str + len, &*m_buffer.begin() + m_WritePos);
+    HasWritten(len);
 }
 
 void Buffer::Append(const std::string &str)
@@ -67,97 +72,68 @@ void Buffer::Append(const std::string &str)
     Append(str.data(), str.length());
 }
 
-void Buffer::Append(const void *data, size_t len)
+void Buffer::Append(const Buffer &buffer)
 {
-    assert(data);
-    Append(static_cast<const char *>(data), len);
+    Append(buffer.Peek(), buffer.ReadableBytes());
 }
 
-void Buffer::Append(const char *str, size_t len)
+ssize_t Buffer::ReadFd(int fd, int *Errno)
 {
-    assert(str);
-    EnsureWriteable(len);
-    std::copy(str, str + len, BeginWrite());
-    HasWritten(len);
-}
-
-void Buffer::Append(const Buffer &buff)
-{
-    Append(buff.Peek(), buff.ReadableBytes());
-}
-
-void Buffer::EnsureWriteable(size_t len)
-{
-    if (WritableBytes() < len)
-    {
-        MakeSpace_(len);
-    }
-    assert(WritableBytes() >= len);
-}
-
-ssize_t Buffer::ReadFd(int fd, int *saveErrno)
-{
-    char buff[65535];
+    char buffer[65535];
     struct iovec iov[2];
     const size_t writable = WritableBytes();
-    /* 分散读， 保证数据全部读完 */
-    iov[0].iov_base = BeginPtr_() + writePos_;
+    /*分散读，保证数据读完*/
+    iov[0].iov_base = &*m_buffer.begin() + m_WritePos;
     iov[0].iov_len = writable;
-    iov[1].iov_base = buff;
-    iov[1].iov_len = sizeof(buff);
-
+    iov[1].iov_base = buffer;
+    iov[1].iov_len = sizeof(buffer);
     const ssize_t len = readv(fd, iov, 2);
     if (len < 0)
     {
-        *saveErrno = errno;
+        *Errno = errno;
     }
     else if (static_cast<size_t>(len) <= writable)
     {
-        writePos_ += len;
+        m_WritePos += len;
     }
     else
     {
-        writePos_ = buffer_.size();
-        Append(buff, len - writable);
+        m_WritePos = m_buffer.size();
+        Append(buffer, len - writable);
     }
     return len;
 }
-
-ssize_t Buffer::WriteFd(int fd, int *saveErrno)
+ssize_t Buffer::WriteFd(int fd, int *Errno) // Errno为错误码
 {
-    size_t readSize = ReadableBytes();
-    ssize_t len = write(fd, Peek(), readSize);
+    size_t ReadSize = ReadableBytes();
+    ssize_t len = write(fd, Peek(), ReadSize);
     if (len < 0)
     {
-        *saveErrno = errno;
+        *Errno = errno;
         return len;
     }
-    readPos_ += len;
+    m_ReadPos += len;
     return len;
 }
 
-char *Buffer::BeginPtr_()
+void Buffer::m_MakeSpace(size_t len)
 {
-    return &*buffer_.begin();
-}
-
-const char *Buffer::BeginPtr_() const
-{
-    return &*buffer_.begin();
-}
-
-void Buffer::MakeSpace_(size_t len)
-{
-    if (WritableBytes() + PrependableBytes() < len)
+    if (m_ReadPos + WritableBytes() < len)
     {
-        buffer_.resize(writePos_ + len + 1);
+        m_buffer.resize(m_WritePos + len + 1);
     }
     else
     {
         size_t readable = ReadableBytes();
-        std::copy(BeginPtr_() + readPos_, BeginPtr_() + writePos_, BeginPtr_());
-        readPos_ = 0;
-        writePos_ = readPos_ + readable;
+        std::copy(&*m_buffer.begin() + m_ReadPos, &*m_buffer.begin() + m_WritePos, &*m_buffer.begin());
+        m_ReadPos = 0;
+        m_WritePos = m_ReadPos + readable;
         assert(readable == ReadableBytes());
     }
+}
+
+void Buffer::RetrieveUntil(const char *end)
+{
+    assert(Peek() <= end);
+    Retrieve(end - Peek());
 }
