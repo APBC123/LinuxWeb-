@@ -1,206 +1,86 @@
 #include "log.h"
 
-using namespace std;
-
 Log::Log()
 {
-    lineCount_ = 0;
-    isAsync_ = false;
-    writeThread_ = nullptr;
-    deque_ = nullptr;
-    toDay_ = 0;
-    fp_ = nullptr;
+    m_LineCount = 0;
+    m_WriteThread = nullptr;
+    m_deque = nullptr;
+    m_Today = 0;
+    m_fp = nullptr;
 }
 
 Log::~Log()
 {
-    if (writeThread_ && writeThread_->joinable())
+    if (m_WriteThread && m_WriteThread->joinable())
     {
-        while (!deque_->empty())
+        while (!m_deque->Empty())
         {
-            deque_->flush();
-        };
-        deque_->Close();
-        writeThread_->join();
+            m_deque->Flush();
+        }
+        m_deque->Close();
+        m_WriteThread->join();
     }
-    if (fp_)
+    if (m_fp)
     {
-        lock_guard<mutex> locker(mtx_);
-        flush();
-        fclose(fp_);
+        std::lock_guard<std::mutex> locker(m_mtx);
+        Flush();
+        fclose(m_fp);
     }
 }
 
 int Log::GetLevel()
 {
-    lock_guard<mutex> locker(mtx_);
-    return level_;
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_level;
 }
 
 void Log::SetLevel(int level)
 {
-    lock_guard<mutex> locker(mtx_);
-    level_ = level;
+    std::lock_guard<std::mutex> locker(m_mtx);
+    m_level = level;
 }
 
-void Log::init(int level = 1, const char *path, const char *suffix,
-               int maxQueueSize)
-{
-    isOpen_ = true;
-    level_ = level;
-    if (maxQueueSize > 0)
-    {
-        isAsync_ = true;
-        if (!deque_)
-        {
-            unique_ptr<BlockDeque<std::string>> newDeque(new BlockDeque<std::string>);
-            deque_ = move(newDeque);
-
-            std::unique_ptr<std::thread> NewThread(new thread(FlushLogThread));
-            writeThread_ = move(NewThread);
-        }
-    }
-    else
-    {
-        isAsync_ = false;
-    }
-
-    lineCount_ = 0;
-
-    time_t timer = time(nullptr);
-    struct tm *sysTime = localtime(&timer);
-    struct tm t = *sysTime;
-    path_ = path;
-    suffix_ = suffix;
-    char fileName[LOG_NAME_LEN] = {0};
-    snprintf(fileName, LOG_NAME_LEN - 1, "%s/%04d_%02d_%02d%s",
-             path_, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, suffix_);
-    toDay_ = t.tm_mday;
-
-    {
-        lock_guard<mutex> locker(mtx_);
-        buff_.RetrieveAll();
-        if (fp_)
-        {
-            flush();
-            fclose(fp_);
-        }
-
-        fp_ = fopen(fileName, "a");
-        if (fp_ == nullptr)
-        {
-            mkdir(path_, 0777);
-            fp_ = fopen(fileName, "a");
-        }
-        assert(fp_ != nullptr);
-    }
-}
-
-void Log::write(int level, const char *format, ...)
-{
-    struct timeval now = {0, 0};
-    gettimeofday(&now, nullptr);
-    time_t tSec = now.tv_sec;
-    struct tm *sysTime = localtime(&tSec);
-    struct tm t = *sysTime;
-    va_list vaList;
-
-    /* 日志日期 日志行数 */
-    if (toDay_ != t.tm_mday || (lineCount_ && (lineCount_ % MAX_LINES == 0)))
-    {
-        unique_lock<mutex> locker(mtx_);
-        locker.unlock();
-
-        char newFile[LOG_NAME_LEN];
-        char tail[36] = {0};
-        snprintf(tail, 36, "%04d_%02d_%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
-
-        if (toDay_ != t.tm_mday)
-        {
-            snprintf(newFile, LOG_NAME_LEN - 72, "%s/%s%s", path_, tail, suffix_);
-            toDay_ = t.tm_mday;
-            lineCount_ = 0;
-        }
-        else
-        {
-            snprintf(newFile, LOG_NAME_LEN - 72, "%s/%s-%d%s", path_, tail, (lineCount_ / MAX_LINES), suffix_);
-        }
-
-        locker.lock();
-        flush();
-        fclose(fp_);
-        fp_ = fopen(newFile, "a");
-        assert(fp_ != nullptr);
-    }
-
-    {
-        unique_lock<mutex> locker(mtx_);
-        lineCount_++;
-        int n = snprintf(buff_.BeginWrite(), 128, "%d-%02d-%02d %02d:%02d:%02d.%06ld ",
-                         t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-                         t.tm_hour, t.tm_min, t.tm_sec, now.tv_usec);
-
-        buff_.HasWritten(n);
-        AppendLogLevelTitle_(level);
-
-        va_start(vaList, format);
-        int m = vsnprintf(buff_.BeginWrite(), buff_.WritableBytes(), format, vaList);
-        va_end(vaList);
-
-        buff_.HasWritten(m);
-        buff_.Append("\n\0", 2);
-
-        if (isAsync_ && deque_ && !deque_->full())
-        {
-            deque_->push_back(buff_.RetrieveAllToStr());
-        }
-        else
-        {
-            fputs(buff_.Peek(), fp_);
-        }
-        buff_.RetrieveAll();
-    }
-}
-
-void Log::AppendLogLevelTitle_(int level)
+void Log::m_AppendLogLevelTitle(int level)
 {
     switch (level)
     {
     case 0:
-        buff_.Append("[debug]: ", 9);
+        m_buffer.Append("[debug]:");
         break;
     case 1:
-        buff_.Append("[info] : ", 9);
+        m_buffer.Append("[info]:");
         break;
     case 2:
-        buff_.Append("[warn] : ", 9);
+        m_buffer.Append("[warn]:");
         break;
     case 3:
-        buff_.Append("[error]: ", 9);
+        m_buffer.Append("[error]:");
         break;
     default:
-        buff_.Append("[info] : ", 9);
+        m_buffer.Append("[info]:");
         break;
     }
 }
 
-void Log::flush()
+void Log::Flush()
 {
-    if (isAsync_)
-    {
-        deque_->flush();
-    }
-    fflush(fp_);
+    m_deque->Flush();
+    fflush(m_fp);
 }
 
-void Log::AsyncWrite_()
+void Log::AsyncWrite()
 {
-    string str = "";
-    while (deque_->pop(str))
+    std::string str = "";
+    while (m_deque->Pop(str))
     {
-        lock_guard<mutex> locker(mtx_);
-        fputs(str.c_str(), fp_);
+        std::lock_guard<std::mutex> locker(m_mtx);
+        fputs(str.c_str(), m_fp);
     }
+}
+
+bool Log::IsOpen()
+{
+    return m_IsOpen;
 }
 
 Log *Log::Instance()
@@ -208,8 +88,105 @@ Log *Log::Instance()
     static Log inst;
     return &inst;
 }
-
 void Log::FlushLogThread()
 {
-    Log::Instance()->AsyncWrite_();
+    Log::Instance()->AsyncWrite();
+}
+
+void Log::Init(int level = 1, const char *path, const char *suffix, int MaxQueueSize)
+{
+    m_IsOpen = true;
+    m_level = level;
+    assert(MaxQueueSize > 0);
+    if (!m_deque)
+    {
+        std::unique_ptr<BlockDeque<std::string>> NewDeque(new BlockDeque<std::string>);
+        m_deque = std::move(NewDeque);
+        std::unique_ptr<std::thread> NewThread(new std::thread(FlushLogThread));
+        m_WriteThread = std::move(NewThread);
+    }
+    m_LineCount = 0;
+    time_t timer = time(nullptr);
+    struct tm *SysTime = localtime(&timer);
+    struct tm t = *SysTime;
+    m_path = path;
+    m_suffix = suffix;
+    char FileName[LOG_NAME_LEN] = {0};
+    snprintf(FileName, LOG_NAME_LEN - 1, "%s/%04d_%02d_%02d%s", m_path, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, m_suffix);
+    m_Today = t.tm_mday;
+    {
+        std::lock_guard<std::mutex> locker(m_mtx);
+        m_buffer.RetrieveAll();
+        if (m_fp)
+        {
+            Flush();
+            fclose(m_fp);
+        }
+        m_fp = fopen(FileName, "a"); // FileName文件有可能不存在
+        if (m_fp == nullptr)
+        {
+            mkdir(m_path, 0777); // 第二个参数是目录的模式，如果是0777，表示文件所有者、文件所有者所在的组的*用户、*所有用户，都有权限进行读、写、执行的操作。
+            m_fp = fopen(FileName, "a");
+        }
+        assert(m_fp != nullptr);
+    }
+}
+
+void Log::Write(int level, const char *format, ...)
+{
+    struct timeval now = {0, 0};
+    gettimeofday(&now, nullptr);
+    time_t TSec = now.tv_sec;
+    struct tm *SysTime = localtime(&TSec);
+    struct tm t = *SysTime;
+    va_list VaList;
+    /*写入日志日期 日志行数*/
+    if (m_Today != t.tm_mday || (m_LineCount && (m_LineCount == MAX_LINES)))
+    {
+        std::unique_lock<std::mutex> locker(m_mtx);
+        locker.unlock();
+        char NewFile[LOG_NAME_LEN];
+        char tail[36] = {0};
+        snprintf(tail, 36, "%04d_%02d_%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+        if (m_Today != t.tm_mday)
+        {
+            snprintf(NewFile, LOG_NAME_LEN - 72, "%s/%s%s", m_path, tail, m_suffix);
+            m_Today = t.tm_mday;
+            m_LineCount = 0;
+        }
+        else
+        {
+            snprintf(NewFile, LOG_NAME_LEN - 72, "%s/%s-%d%s", m_path, tail, (m_LineCount / MAX_LINES), m_suffix);
+        }
+
+        locker.lock();
+        Flush();
+        fclose(m_fp);
+        m_fp = fopen(NewFile, "a");
+        assert(m_fp != nullptr);
+    }
+
+    {
+        std::unique_lock<std::mutex> locker(m_mtx);
+        m_LineCount++;
+        int n = snprintf(m_buffer.BeginWrite(), 128, "%d-%02d-%02d %02d:%02d:%02d.%06ld ",
+                         t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+                         t.tm_hour, t.tm_min, t.tm_sec, now.tv_usec);
+        m_buffer.HasWritten(n);
+        m_AppendLogLevelTitle(level);
+        va_start(VaList, format);
+        int m = vsnprintf(m_buffer.BeginWrite(), m_buffer.WritableBytes(), format, VaList);
+        va_end(VaList);
+        m_buffer.HasWritten(m);
+        m_buffer.Append("\n\0", 2);
+        if (m_deque && !m_deque->Full())
+        {
+            m_deque->Push_Back(m_buffer.RetrieveAllToStr());
+        }
+        else
+        {
+            fputs(m_buffer.Peek(), m_fp);
+        }
+        m_buffer.RetrieveAll();
+    }
 }
