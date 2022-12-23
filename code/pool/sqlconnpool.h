@@ -1,11 +1,12 @@
 #ifndef SQLCONNPOOL_H
 #define SQLCONNPOOL_H
-#include <mysql/mysql.h>
-#include <string>
+
 #include <queue>
 #include <mutex>
-#include <semaphore.h>
 #include <thread>
+#include <string>
+#include <semaphore.h>
+#include <mysql/mysql.h>
 #include "../log/log.h"
 
 class SqlConnPool
@@ -13,19 +14,19 @@ class SqlConnPool
 public:
     SqlConnPool();
     ~SqlConnPool();
-    static SqlConnPool *Instance();
+    void Init(const char *host, int port, const char *user, const char *password, const char *DataBaseName, int ConnSize);
+    static SqlConnPool *Instance(); // // 创建一个static对象(单例),用于对象间通信
     MYSQL *GetConn();
-    void FreeConn(MYSQL *conn);
+    void FreeConn(MYSQL *sql);
     int GetFreeConnCount();
-    void Init(const char *host, int port, const char *user, const char *pwd, const char *dbname, int connsize);
     void ClosePool();
 
 private:
-    int MAX_CONN;
-    int m_usecount;
-    int m_freecount;
-    std::queue<MYSQL *> m_connque;
+    int m_MAX_CONN;
+    int m_UseCount;
+    int m_FreeCount;
+    std::queue<MYSQL *> m_ConnQue;
     std::mutex m_mtx;
-    sem_t m_semid;
+    sem_t m_SemID;
 };
 #endif
