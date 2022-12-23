@@ -2,199 +2,160 @@
 #define BLOCKQUEUE_H
 
 #include <mutex>
-#include <deque>
 #include <condition_variable>
 #include <sys/time.h>
+#include <deque>
+#include <assert.h>
 
 template <class T>
 class BlockDeque
 {
 public:
-    explicit BlockDeque(size_t MaxCapacity = 1000);
-
+    BlockDeque(size_t MaxCapacity = 800);
     ~BlockDeque();
-
-    void clear();
-
-    bool empty();
-
-    bool full();
-
+    bool Empty();
+    bool Full();
+    void Clear();
     void Close();
-
-    size_t size();
-
-    size_t capacity();
-
-    T front();
-
-    T back();
-
-    void push_back(const T &item);
-
-    void push_front(const T &item);
-
-    bool pop(T &item);
-
-    bool pop(T &item, int timeout);
-
-    void flush();
+    void Push_Back(const T &item);
+    void Push_Front(const T &item);
+    bool Pop(T &item);
+    void Flush();
+    size_t Size();
+    size_t Capacity();
+    T Front();
+    T Back();
 
 private:
-    std::deque<T> deq_;
-
-    size_t capacity_;
-
-    std::mutex mtx_;
-
-    bool isClose_;
-
-    std::condition_variable condConsumer_;
-
-    std::condition_variable condProducer_;
+    std::deque<T> m_deque;
+    std::mutex m_mtx;
+    bool m_isclose;
+    size_t m_capacity;
+    std::condition_variable m_CondConsumer;
+    std::condition_variable m_CondProducer;
 };
 
 template <class T>
-BlockDeque<T>::BlockDeque(size_t MaxCapacity) : capacity_(MaxCapacity)
+BlockDeque<T>::BlockDeque(size_t MaxCapacity)
 {
     assert(MaxCapacity > 0);
-    isClose_ = false;
+    m_capacity = MaxCapacity;
+    m_isclose = false;
 }
 
 template <class T>
 BlockDeque<T>::~BlockDeque()
 {
     Close();
-};
+}
+
+template <class T>
+bool BlockDeque<T>::Empty()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_deque.empty();
+}
+
+template <class T>
+bool BlockDeque<T>::Full()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_deque.size() >= m_capacity;
+}
+
+template <class T>
+void BlockDeque<T>::Clear()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    m_deque.clear();
+}
 
 template <class T>
 void BlockDeque<T>::Close()
 {
     {
-        std::lock_guard<std::mutex> locker(mtx_);
-        deq_.clear();
-        isClose_ = true;
+        std::lock_guard<std::mutex> locker(m_mtx);
+        m_deque.clear();
+        m_isclose = true;
     }
-    condProducer_.notify_all();
-    condConsumer_.notify_all();
-};
-
-template <class T>
-void BlockDeque<T>::flush()
-{
-    condConsumer_.notify_one();
-};
-
-template <class T>
-void BlockDeque<T>::clear()
-{
-    std::lock_guard<std::mutex> locker(mtx_);
-    deq_.clear();
+    m_CondConsumer.notify_all();
+    m_CondProducer.notify_all();
 }
 
 template <class T>
-T BlockDeque<T>::front()
+void BlockDeque<T>::Push_Back(const T &item)
 {
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.front();
-}
-
-template <class T>
-T BlockDeque<T>::back()
-{
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.back();
-}
-
-template <class T>
-size_t BlockDeque<T>::size()
-{
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.size();
-}
-
-template <class T>
-size_t BlockDeque<T>::capacity()
-{
-    std::lock_guard<std::mutex> locker(mtx_);
-    return capacity_;
-}
-
-template <class T>
-void BlockDeque<T>::push_back(const T &item)
-{
-    std::unique_lock<std::mutex> locker(mtx_);
-    while (deq_.size() >= capacity_)
+    std::lock_guard<std::mutex> locker(m_mtx);
+    whlie(m_deque.size() >= m_capacity)
     {
-        condProducer_.wait(locker);
+        m_CondProducer.wait(locker);
     }
-    deq_.push_back(item);
-    condConsumer_.notify_one();
+    m_deque.push_back(item);
+    m_CondConsumer.notify_one();
 }
 
 template <class T>
-void BlockDeque<T>::push_front(const T &item)
+void BlockDeque<T>::Push_Front(const T &item)
 {
-    std::unique_lock<std::mutex> locker(mtx_);
-    while (deq_.size() >= capacity_)
+    std::lock_guard<std::mutex> locker(m_mtx);
+    while (m_deque.size() >= m_capacity)
     {
-        condProducer_.wait(locker);
+        m_CondProducer.wait();
     }
-    deq_.push_front(item);
-    condConsumer_.notify_one();
+    m_deque.push_front(item);
+    m_CondConsumer.notify_one();
 }
 
 template <class T>
-bool BlockDeque<T>::empty()
+bool BlockDeque<T>::Pop(T &item)
 {
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.empty();
-}
-
-template <class T>
-bool BlockDeque<T>::full()
-{
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.size() >= capacity_;
-}
-
-template <class T>
-bool BlockDeque<T>::pop(T &item)
-{
-    std::unique_lock<std::mutex> locker(mtx_);
-    while (deq_.empty())
+    std::lock_guard<std::mutex> locker(m_mtx);
+    while (m_deque.empty())
     {
-        condConsumer_.wait(locker);
-        if (isClose_)
+        m_CondConsumer.wait(locker);
+        if (m_isclose)
         {
             return false;
         }
     }
-    item = deq_.front();
-    deq_.pop_front();
-    condProducer_.notify_one();
+    item = m_deque.front();
+    m_deque.pop_front();
+    m_CondProducer.notify_one();
     return true;
 }
 
 template <class T>
-bool BlockDeque<T>::pop(T &item, int timeout)
+void BlockDeque<T>::Flush()
 {
-    std::unique_lock<std::mutex> locker(mtx_);
-    while (deq_.empty())
-    {
-        if (condConsumer_.wait_for(locker, std::chrono::seconds(timeout)) == std::cv_status::timeout)
-        {
-            return false;
-        }
-        if (isClose_)
-        {
-            return false;
-        }
-    }
-    item = deq_.front();
-    deq_.pop_front();
-    condProducer_.notify_one();
-    return true;
+    m_CondConsumer.notify_one();
+}
+
+template <class T>
+size_t BlockDeque<T>::Size()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_deque.size();
+}
+
+template <class T>
+size_t BlockDeque<T>::Capacity()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_capacity();
+}
+
+template <class T>
+T BlockDeque<T>::Front()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_deque.front();
+}
+
+template <class T>
+T BlockDeque<T>::Back()
+{
+    std::lock_guard<std::mutex> locker(m_mtx);
+    return m_deque.back();
 }
 
 #endif
