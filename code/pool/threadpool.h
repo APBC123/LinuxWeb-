@@ -12,8 +12,17 @@ class ThreadPool
 public:
     ThreadPool(size_t ThreadCount);
     ~ThreadPool();
-    template <class T>
-    void AddTask(T &task);
+    ThreadPool() = default;
+    ThreadPool(ThreadPool &&) = default;
+    template <class F>
+    void AddTask(F &&task)
+    {
+        {
+            std::lock_guard<std::mutex> locker(m_pool->m_mtx);
+            m_pool->tasks.emplace_back(task);
+        }
+        m_pool->cond.notify_one();
+    }
 
 private:
     struct Pool
@@ -69,13 +78,4 @@ ThreadPool::~ThreadPool()
     }
 }
 
-template <class T>
-void AddTask(T &task)
-{
-    {
-        std::lock_guard<std::mutex> locker(m_pool->m_mtx);
-        m_pool->tasks.emplace_back(task);
-    }
-    m_pool->cond.notify_one();
-}
 #endif
