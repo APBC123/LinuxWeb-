@@ -137,3 +137,4 @@ void Buffer::RetrieveUntil(const char *end)
     assert(Peek() <= end);
     Retrieve(end - Peek());
 }
+
