@@ -40,3 +40,4 @@ private:
     std::atomic<std::size_t> m_WritePos;
 };
 #endif
+
